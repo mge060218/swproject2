@@ -1,0 +1,104 @@
+#include <Servo.h> 
+#include <math.h> 
+
+#define PIN_SERVO 10 
+#define PIN_TRIG 12 
+#define PIN_ECHO 13 
+
+Servo myServo; 
+
+const int ANGLE_DOWN = 0;       
+const int ANGLE_UP = 80;            
+const unsigned long MOVING_TIME = 3000;    
+const unsigned long WAIT_TIME = 1000;      
+
+const int DISTANCE_MAX_DETECT = 35;  
+const int DISTANCE_PASS_THRESHOLD = 20; 
+
+const float SIGMOID_K_FACTOR = 6.0; 
+
+unsigned long moveStartTime = 0; 
+unsigned long waitStartTime = 0;
+bool targetIsUp = false; 
+bool isWaiting = false;  
+
+long readDistance() { 
+    digitalWrite(PIN_TRIG, LOW); 
+    delayMicroseconds(2); 
+    digitalWrite(PIN_TRIG, HIGH); 
+    delayMicroseconds(10); 
+    digitalWrite(PIN_TRIG, LOW); 
+
+    long duration = pulseIn(PIN_ECHO, HIGH, 25000L); 
+
+    long distanceCm = duration * 0.034 / 2; 
+    
+    if (duration == 0) return 999; 
+    
+    return distanceCm; 
+} 
+
+float sigmoid(float x, float k) { 
+    float z = (x * 2.0 * k) - k; 
+    return 1.0 / (1.0 + exp(-z));  
+} 
+
+void setup() { 
+    Serial.begin(9600); 
+
+    myServo.attach(PIN_SERVO); 
+    myServo.write(ANGLE_DOWN); 
+
+    pinMode(PIN_TRIG, OUTPUT); 
+    pinMode(PIN_ECHO, INPUT); 
+} 
+
+void loop() { 
+    long distance = readDistance(); 
+    unsigned long currentTime = millis(); 
+    
+    bool isMoving = (currentTime - moveStartTime) < MOVING_TIME;
+
+    if (!isMoving && !isWaiting) {
+        
+        if (distance <= DISTANCE_MAX_DETECT && distance > DISTANCE_PASS_THRESHOLD && !targetIsUp) {
+            moveStartTime = currentTime; 
+            targetIsUp = true; 
+        } 
+        
+        else if (distance <= DISTANCE_PASS_THRESHOLD && targetIsUp) {
+            waitStartTime = currentTime;
+            isWaiting = true;
+        }
+    }
+
+    if (isWaiting) {
+        if (currentTime - waitStartTime >= WAIT_TIME) {
+            moveStartTime = currentTime;
+            isWaiting = false;
+            targetIsUp = false; 
+        } else {
+            myServo.write(ANGLE_UP);
+        }
+    }
+    
+    if (isMoving) {
+        unsigned long timeElapsed = currentTime - moveStartTime;
+        
+        if (timeElapsed < MOVING_TIME) {
+            float progress = (float)timeElapsed / MOVING_TIME; 
+            float sigmoidValue = sigmoid(progress, SIGMOID_K_FACTOR); 
+            
+            int start = targetIsUp ? ANGLE_DOWN : ANGLE_UP; 
+            int end = targetIsUp ? ANGLE_UP : ANGLE_DOWN; 
+            
+            long currentAngle = (long)(start + sigmoidValue * (end - start)); 
+            
+            myServo.write(currentAngle); 
+        } else { 
+            myServo.write(targetIsUp ? ANGLE_UP : ANGLE_DOWN); 
+        } 
+    } 
+    
+    delay(50); 
+}
