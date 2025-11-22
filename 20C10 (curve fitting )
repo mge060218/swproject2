@@ -1,0 +1,120 @@
+#define PIN_IR A0
+
+const int NUM_SAMPLES = 7;
+float x_vals[NUM_SAMPLES] = {0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0}; 
+float y_vals[NUM_SAMPLES]; 
+int sampleCount = 0;
+
+int compare(const void *a, const void *b) {
+  return (*(unsigned int *)a - *(unsigned int *)b);
+}
+
+unsigned int ir_sensor_filtered(unsigned int n, float position)
+{
+  unsigned int *ir_val, ret_val;
+
+  if ((n == 0) || (n > 100) || (position < 0.0) || (position > 1))
+    return 0;
+
+  ir_val = (unsigned int *)malloc(sizeof(unsigned int) * n);
+  if (ir_val == NULL)
+    return 0;
+
+  for (int i = 0; i < n; i++)
+    ir_val[i] = analogRead(PIN_IR);
+
+  qsort(ir_val, n, sizeof(unsigned int), compare);
+  ret_val = ir_val[(unsigned int)(n * position)];
+  free(ir_val);
+  
+  return ret_val;
+}
+
+void curveFittingQuadratic(float x[], float y[], int n)
+{
+  Serial.println("\n--- Curve Fitting 계산 시작 ---");
+  
+  float sumX=0, sumX2=0, sumX3=0, sumX4=0;
+  float sumY=0, sumXY=0, sumX2Y=0;
+
+  for (int i = 0; i < n; i++)
+  {
+    sumX += x[i];
+    sumX2 += x[i]*x[i];
+    sumX3 += x[i]*x[i]*x[i];
+    sumX4 += x[i]*x[i]*x[i]*x[i];
+    sumY += y[i];
+    sumXY += x[i]*y[i];
+    sumX2Y += x[i]*x[i]*y[i];
+  }
+
+  float D = (sumX4*(sumX2*n - sumX*sumX) - sumX3*(sumX3*n - sumX*sumX2) + sumX2*(sumX3*sumX - sumX2*sumX2));
+  
+  if (abs(D) < 1e-6) {
+    Serial.println("오류: Curve Fitting을 위한 행렬식이 0에 가깝습니다. 데이터를 확인하세요.");
+    return;
+  }
+
+  float Da = (sumX2Y*(sumX2*n - sumX*sumX) - sumXY*(sumX3*n - sumX*sumX2) + sumY*(sumX3*sumX - sumX2*sumX2));
+  float Db = (sumX4*(sumXY*n - sumY*sumX) - sumX3*(sumX2Y*n - sumY*sumX2) + sumX2*(sumX2Y*sumX - sumXY*sumX2));
+  float Dc = (sumX4*(sumX2*sumY - sumXY*sumX) - sumX3*(sumX3*sumY - sumX2Y*sumX) + sumX2*(sumX3*sumXY - sumX2*sumX2Y));
+
+  float a = Da / D;
+  float b = Db / D;
+  float c = Dc / D;
+  
+  Serial.println("\n--- Equation ---");
+  Serial.print("Y (Sensor Value) = ");
+  Serial.print(a, 9); Serial.print(" * X^2 + ");
+  Serial.print(b, 9); Serial.print(" * X + ");
+  Serial.println(c, 9);
+  Serial.println("----------------------------------------------------------");
+}
+
+
+void setup()
+{
+  Serial.begin(1000000);
+  Serial.println("--- Curve Fitting 프로그램 ---");
+  Serial.println(" ");
+  Serial.println(" 데이터 수집 ");
+  Serial.print("    탁구공을 ");
+  Serial.print(x_vals[0]);
+  Serial.println("cm에 위치시키고 엔터를 누르세요.");
+}
+
+void loop()
+{
+  if (Serial.available() > 0)
+  {
+    while (Serial.available()) {
+      Serial.read();
+    }
+
+    if (sampleCount < NUM_SAMPLES)
+    {
+      unsigned int filtered = ir_sensor_filtered(20, 0.5); 
+      y_vals[sampleCount] = (float)filtered;
+
+      Serial.print("✅ 측정 완료: ");
+      Serial.print(x_vals[sampleCount]);
+      Serial.print("cm → 센서 값(Analog) ");
+      Serial.println(filtered);
+      
+      sampleCount++;
+
+      if (sampleCount < NUM_SAMPLES) {
+        Serial.print("    탁구공을 ");
+        Serial.print(x_vals[sampleCount]);
+        Serial.println("cm에 위치시키고 엔터를 누르세요.");
+      } else {
+        Serial.println("\n--- 데이터 수집 완료 ---");
+        
+        curveFittingQuadratic(x_vals, y_vals, NUM_SAMPLES);
+        
+        Serial.println("\n*** 프로그램 종료 ***");
+        while (1); 
+      }
+    }
+  }
+}
